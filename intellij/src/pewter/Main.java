@@ -17,6 +17,8 @@ import javax.swing.text.DefaultStyledDocument;
 import javax.swing.text.Document;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
+import javax.swing.tree.TreeNode;
+import javax.swing.tree.TreePath;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
@@ -27,6 +29,7 @@ import java.awt.dnd.DropTargetEvent;
 import java.awt.dnd.DropTargetListener;
 import java.awt.event.ActionEvent;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.TooManyListenersException;
 import java.util.function.BiConsumer;
@@ -132,6 +135,71 @@ public class Main {
         public String toString() {
             return getName();
         }
+    }
+
+    private static void createExample(JTree overviewPanelActionsResources) {
+        DefaultMutableTreeNode examplePattern = newResource(overviewPanelActionsResources, (DefaultMutableTreeNode) overviewPanelActionsResources.getModel().getRoot());
+        try {
+            String text = new String(java.nio.file.Files.readAllBytes(Paths.get("src/parsers/Example")));
+            ((Document)((Resource)examplePattern.getUserObject()).getContent()).insertString(0, text, null);
+        } catch (BadLocationException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        DefaultMutableTreeNode examplePatternExample = newResource(overviewPanelActionsResources, examplePattern);
+        try {
+            String text = "HI THERE";
+            ((Document)((Resource)examplePatternExample.getUserObject()).getContent()).insertString(0, text, null);
+        } catch (BadLocationException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static DefaultMutableTreeNode newResource(JTree overviewPanelActionsResources, DefaultMutableTreeNode parent) {
+        DefaultMutableTreeNode parentResourceNode = (DefaultMutableTreeNode)parent;//(DefaultMutableTreeNode)overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
+
+        DefaultMutableTreeNode resourceNode = new DefaultMutableTreeNode();
+        Resource resource = new AbstractResource() {
+            @Override
+            public Language getLanguage() {
+                return (Resource)((DefaultMutableTreeNode)resourceNode.getParent()).getUserObject();
+            }
+        };
+        resource.setContent(new DefaultStyledDocument());
+        resource.setName("Example" + (parentResourceNode.getChildCount() + 1));
+        resourceNode.setUserObject(resource);
+
+        overviewPanelActionsResources.getModel().addTreeModelListener(new TreeModelListener() {
+            @Override
+            public void treeNodesChanged(TreeModelEvent e) {
+
+            }
+
+            @Override
+            public void treeNodesInserted(TreeModelEvent e) {
+                /*if(e.getTreePath().getLastPathComponent().equals(resourceNode)) {
+                    overviewPanelActionsResources.expandPath(e.getTreePath());
+                    overviewPanelActionsResources.getModel().removeTreeModelListener(this);
+                }*/
+                overviewPanelActionsResources.expandPath(e.getTreePath());
+                overviewPanelActionsResources.getModel().removeTreeModelListener(this);
+            }
+
+            @Override
+            public void treeNodesRemoved(TreeModelEvent e) {
+
+            }
+
+            @Override
+            public void treeStructureChanged(TreeModelEvent e) {
+
+            }
+        });
+
+        ((DefaultTreeModel) overviewPanelActionsResources.getModel()).insertNodeInto(resourceNode, parentResourceNode, parentResourceNode.getChildCount());
+
+        return resourceNode;
     }
 
     public static void main(String[] args) throws Exception {
@@ -403,49 +471,13 @@ public class Main {
                 if (overviewPanelActionsResources.getSelectionCount() == 1) {
                     DefaultMutableTreeNode parentResourceNode = (DefaultMutableTreeNode)overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
 
-                    DefaultMutableTreeNode resourceNode = new DefaultMutableTreeNode();
-                    Resource resource = new AbstractResource() {
-                        @Override
-                        public Language getLanguage() {
-                            return (Resource)((DefaultMutableTreeNode)resourceNode.getParent()).getUserObject();
-                        }
-                    };
-                    resource.setContent(new DefaultStyledDocument());
-                    resource.setName("Example" + (parentResourceNode.getChildCount() + 1));
-                    resourceNode.setUserObject(resource);
-
-                    overviewPanelActionsResources.getModel().addTreeModelListener(new TreeModelListener() {
-                        @Override
-                        public void treeNodesChanged(TreeModelEvent e) {
-
-                        }
-
-                        @Override
-                        public void treeNodesInserted(TreeModelEvent e) {
-                            /*if(e.getTreePath().getLastPathComponent().equals(resourceNode)) {
-                                overviewPanelActionsResources.expandPath(e.getTreePath());
-                                overviewPanelActionsResources.getModel().removeTreeModelListener(this);
-                            }*/
-                            overviewPanelActionsResources.expandPath(e.getTreePath());
-                            overviewPanelActionsResources.getModel().removeTreeModelListener(this);
-                        }
-
-                        @Override
-                        public void treeNodesRemoved(TreeModelEvent e) {
-
-                        }
-
-                        @Override
-                        public void treeStructureChanged(TreeModelEvent e) {
-
-                        }
-                    });
-
-                    ((DefaultTreeModel) overviewPanelActionsResources.getModel()).insertNodeInto(resourceNode, parentResourceNode, parentResourceNode.getChildCount());
+                    newResource(overviewPanelActionsResources, parentResourceNode);
                 }
             }
         });
         contentPane.add(toolBar, BorderLayout.NORTH);
+
+        createExample(overviewPanelActionsResources);
 
         frame.setVisible(true);
     }

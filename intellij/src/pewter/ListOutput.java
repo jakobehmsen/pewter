@@ -29,4 +29,9 @@ public class ListOutput implements Output {
     public void reset() {
         list.subList(marks.pop(), list.size()).clear();
     }
+
+    @Override
+    public Input toInput() {
+        return new ListInput(list);
+    }
 }

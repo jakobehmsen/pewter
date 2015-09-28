@@ -17,7 +17,7 @@ function repeat(pattern) {
     }
 }
 
-function isString(string) {
+function stringIs(string) {
     return function(input, acceptOutput, rejectOutput) {
         for(var i = 0; i < string.length; i++) {
             if(string[i] === input.peekChar().toString()) {
@@ -43,7 +43,7 @@ function seq(patternSequence) {
 }
 
 function ignore() {
-    return repeat(isString(" "));
+    return repeat(stringIs(" "));
 }
 
 function atEnd() {
@@ -62,11 +62,113 @@ function out(value) {
 
 function capture(pattern) {
     return function(input, acceptOutput, rejectOutput) {
-        // Wrap input into capturing input; an input that outputs each consumed element
-        var capturingInput = input;
+        var capturingInput = {
+            peekChar: function() {
+                return input.peekChar();
+            },
+            consume: function() {
+                input.copyTo(acceptOutput);
+                input.consume();
+            },
+            copyTo: function(output) {
+                input.copyTo(output);
+            },
+            atEnd: function() {
+                return input.atEnd();
+            },
+            mark: function() {
+                input.mark();
+                acceptOutput.mark();
+            },
+            reset: function() {
+                input.reset();
+                acceptOutput.reset();
+            }
+        };
 
         return pattern(capturingInput, acceptOutput, rejectOutput);
     }
+}
+
+var ArrayList = Java.type("java.util.ArrayList");
+var ListOutput = Java.type("pewter.ListOutput");
+
+function pipe(source, target) {
+    return function(input, acceptOutput, rejectOutput) {
+        var intermediate = new ListOutput(new ArrayList);
+
+        if(source(input, intermediate, rejectOutput)) {
+            return target(intermediate.toInput(), acceptOutput, rejectOutput);
+        }
+
+        return false;
+    }
+}
+
+function reduce(collector) {
+    return function(input, acceptOutput, rejectOutput) {
+        var reduction = input.toStream().map(function(x){return x.toString();}).collect(collector);
+        acceptOutput.append(reduction);
+        return true;
+    }
+}
+
+function stringJoin(separator) {
+    if(separator === undefined)
+        separator = "";
+    return reduce(Java.type("java.util.stream.Collectors").joining(separator));
+}
+
+function decision(first, second) {
+    return function(input, acceptOutput, rejectOutput) {
+        input.mark();
+        acceptOutput.mark();
+        rejectOutput.mark();
+
+        if(!first(input, acceptOutput, rejectOutput)) {
+            input.reset();
+            acceptOutput.reset();
+            rejectOutput.reset();
+
+
+            return second(input, acceptOutput, rejectOutput);
+        }
+
+        return true;
+    }
+}
+
+var Character = Java.type("java.lang.Character");
+
+function ifChar(testMethod) {
+    var method = Character[testMethod];
+
+    return function(input, acceptOutput, rejectOutput) {
+        return method(input.peekChar());
+    }
+}
+
+function charIs(ch) {
+    return function(input, acceptOutput, rejectOutput) {
+        return input.peekChar().toString() === ch;
+    }
+}
+
+function consume() {
+    return function(input, acceptOutput, rejectOutput) {
+        input.consume();
+        return true;
+    }
+}
+
+function id() {
+    return seq([
+        ifChar("isLetter"), consume(),
+        repeat(seq([
+            decision(ifChar("isLetter"), ifChar("isDigit")),
+            consume()
+        ]))
+    ]);
 }
 
 function main() {
@@ -74,13 +176,11 @@ function main() {
         eval: function(input, acceptOutput, rejectOutput) {
             return seq([
                 ignore(),
-                isString("HI"),
+                pipe(capture(id()), stringJoin()),
                 ignore(),
-                isString("THERE"),
+                pipe(capture(stringIs("THERE")), stringJoin()),
                 ignore(),
-                atEnd(),
-                out("YAY"),
-                out("YOU")
+                atEnd()
             ])(input, acceptOutput, rejectOutput);
         }
     };

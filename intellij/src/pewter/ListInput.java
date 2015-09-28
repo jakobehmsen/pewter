@@ -1,29 +1,25 @@
 package pewter;
 
+import java.util.List;
 import java.util.Stack;
 
-public class CharSequenceInput implements Input {
-    private CharSequence chars;
+public class ListInput implements Input {
+    private List<Object> list;
     private int index;
     private Stack<Integer> marks = new Stack<>();
 
-    public CharSequenceInput(CharSequence chars) {
-        this.chars = chars;
+    public ListInput(List<Object> list) {
+        this.list = list;
     }
 
     @Override
     public boolean atEnd() {
-        return index == chars.length();
+        return index == list.size();
     }
 
     @Override
     public Object peek() {
-        return peekChar();
-    }
-
-    @Override
-    public char peekChar() {
-        return !atEnd() ? chars.charAt(index) : (char)0;
+        return !atEnd() ? list.get(index) : null;
     }
 
     @Override
