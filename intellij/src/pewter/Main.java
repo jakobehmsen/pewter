@@ -27,8 +27,10 @@ import java.awt.dnd.DropTargetEvent;
 import java.awt.dnd.DropTargetListener;
 import java.awt.event.ActionEvent;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.TooManyListenersException;
 import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
 
 public class Main {
     private interface Language {
@@ -81,9 +83,9 @@ public class Main {
 
         @Override
         public void attachTo(Object content, JPanel panel) {
-            JTextPane textPane = new JTextPane();
+            JEditorPane textPane = new JEditorPane();
             textPane.setDocument((Document) content);
-            panel.add(textPane, BorderLayout.CENTER);
+            panel.add(new JScrollPane(textPane), BorderLayout.CENTER);
         }
 
         @Override
@@ -110,7 +112,20 @@ public class Main {
             } catch (BadLocationException e) {
                 e.printStackTrace();
             }
-            return evaluator.callMember("eval", sourceCode);
+
+            Input input = new CharSequenceInput(sourceCode);
+            ListOutput acceptOutput = new ListOutput(new ArrayList<>());
+            ListOutput rejectOutput = new ListOutput(new ArrayList<>());
+
+            boolean accepted = (boolean)evaluator.callMember("eval", input, acceptOutput, rejectOutput);
+
+            if(accepted) {
+                //String result = acceptOutput.getList().stream().map(x -> x.toString()).collect(Collectors.joining(", "));
+                //return acceptOutput.getList().get(0);
+                return acceptOutput.getList();
+            } else {
+                return "REJECT";
+            }
         }
 
         @Override
@@ -127,13 +142,6 @@ public class Main {
         DefaultListModel<Resource> resources = new DefaultListModel<>();
 
         Resource nashhornResource = new AbstractResource() {
-            @Override
-            public void attachTo(Object content, JPanel panel) {
-                JTextPane textPane = new JTextPane();
-                textPane.setDocument((Document) content);
-                panel.add(textPane, BorderLayout.CENTER);
-            }
-
             @Override
             public void dettachFrom(Object content, JPanel panel) {
 
