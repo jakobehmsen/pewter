@@ -1,0 +1,87 @@
+function repeat(pattern) {
+    return function(input, acceptOutput, rejectOutput) {
+        while(true) {
+            input.mark();
+            acceptOutput.mark();
+            rejectOutput.mark();
+
+            if(!pattern(input, acceptOutput, rejectOutput)) {
+                input.reset();
+                acceptOutput.reset();
+                rejectOutput.reset();
+                break;
+            }
+        }
+
+        return true;
+    }
+}
+
+function isString(string) {
+    return function(input, acceptOutput, rejectOutput) {
+        for(var i = 0; i < string.length; i++) {
+            if(string[i] === input.peekChar().toString()) {
+               input.consume();
+            } else {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+function seq(patternSequence) {
+    return function(input, acceptOutput, rejectOutput) {
+        for(var i = 0; i < patternSequence.length; i++) {
+            if(!patternSequence[i](input, acceptOutput, rejectOutput))
+                return false;
+        }
+
+        return true;
+    }
+}
+
+function ignore() {
+    return repeat(isString(" "));
+}
+
+function atEnd() {
+    return function(input, acceptOutput, rejectOutput) {
+        return input.peekChar().toString().codePointAt(0) == 0;
+    }
+}
+
+function out(value) {
+    return function(input, acceptOutput, rejectOutput) {
+        acceptOutput.append(value);
+
+        return true;
+    }
+}
+
+function capture(pattern) {
+    return function(input, acceptOutput, rejectOutput) {
+        // Wrap input into capturing input; an input that outputs each consumed element
+        var capturingInput = input;
+
+        return pattern(capturingInput, acceptOutput, rejectOutput);
+    }
+}
+
+function main() {
+    return {
+        eval: function(input, acceptOutput, rejectOutput) {
+            return seq([
+                ignore(),
+                isString("HI"),
+                ignore(),
+                isString("THERE"),
+                ignore(),
+                atEnd(),
+                out("YAY"),
+                out("YOU")
+            ])(input, acceptOutput, rejectOutput);
+        }
+    };
+}
