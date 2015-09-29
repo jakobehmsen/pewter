@@ -1,5 +1,6 @@
 package pewter;
 
+import com.sun.glass.events.KeyEvent;
 import jdk.nashorn.api.scripting.ScriptObjectMirror;
 
 import javax.activation.DataHandler;
@@ -12,9 +13,7 @@ import javax.swing.event.TreeModelEvent;
 import javax.swing.event.TreeModelListener;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.event.TreeSelectionListener;
-import javax.swing.text.BadLocationException;
-import javax.swing.text.DefaultStyledDocument;
-import javax.swing.text.Document;
+import javax.swing.text.*;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeNode;
@@ -28,12 +27,17 @@ import java.awt.dnd.DropTargetDropEvent;
 import java.awt.dnd.DropTargetEvent;
 import java.awt.dnd.DropTargetListener;
 import java.awt.event.ActionEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.geom.RoundRectangle2D;
 import java.io.IOException;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.TooManyListenersException;
+import java.util.*;
+import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public class Main {
     private interface Language {
@@ -60,9 +64,18 @@ public class Main {
         }
     }
 
+    private interface ResourceStore {
+        java.util.List<Resource> getAllResources();
+    }
+
     private static abstract class AbstractResource implements Resource {
+        private ResourceStore resourceStore;
         private String name;
         private Object content;
+
+        public AbstractResource(ResourceStore resourceStore) {
+            this.resourceStore = resourceStore;
+        }
 
         @Override
         public String getName() {
@@ -86,8 +99,57 @@ public class Main {
 
         @Override
         public void attachTo(Object content, JPanel panel) {
-            JEditorPane textPane = new JEditorPane();
+            JTextPane textPane = new JTextPane();
             textPane.setDocument((Document) content);
+            textPane.getKeymap().addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, InputEvent.CTRL_MASK), new AbstractAction() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    JPopupMenu candidateReferences = new JPopupMenu();
+
+                    resourceStore.getAllResources().forEach(x -> {
+                        candidateReferences.add(new AbstractAction(x.getName()) {
+                            @Override
+                            public void actionPerformed(ActionEvent e) {
+                                int pos = textPane.getCaretPosition();
+                                //((DefaultStyledDocument)textPane.getDocument()).getParagraphElement(pos).
+                                JLabel lbl = new JLabel(x.getName());
+                                lbl.setAlignmentY(0.85f);
+                                lbl.setForeground(Color.BLUE);
+                                lbl.setFont(textPane.getFont());
+                                textPane.insertComponent(lbl);
+
+                                /*String fullText = IntStream.range(0, textPane.getDocument().getLength()).mapToObj(i -> {
+                                    Element ce = textPane.getStyledDocument().getCharacterElement(i);
+
+                                    if (ce.getAttributes().containsAttribute(AbstractDocument.ElementNameAttribute, StyleConstants.ComponentElementName)) {
+                                        JLabel lblComp = (JLabel) StyleConstants.getComponent(ce.getAttributes());
+                                        return lblComp.getText();
+                                    } else {
+                                        try {
+                                            return textPane.getDocument().getText(ce.getStartOffset(), ce.getEndOffset());
+                                        } catch (BadLocationException e1) {
+                                            e1.printStackTrace();
+                                        }
+                                    }
+
+                                    return null;
+                                }).collect(Collectors.joining());
+                                fullText.length();*/
+
+                                /*textPane.getEditorKit().
+                                textPane.getDocument().getRootElements()[0].*/
+                            }
+                        });
+                    });
+
+                    try {
+                        Rectangle caretPosition = textPane.modelToView(textPane.getCaretPosition());
+                        candidateReferences.show(textPane, caretPosition.x, caretPosition.y);
+                    } catch (BadLocationException e1) {
+                        e1.printStackTrace();
+                    }
+                }
+            });
             panel.add(new JScrollPane(textPane), BorderLayout.CENTER);
         }
 
@@ -109,12 +171,7 @@ public class Main {
         @Override
         public Object evaluate(Object content) {
             ScriptObjectMirror evaluator = (ScriptObjectMirror)evaluate();
-            String sourceCode = null;
-            try {
-                sourceCode = ((Document)content).getText(0, ((Document)content).getLength());
-            } catch (BadLocationException e) {
-                e.printStackTrace();
-            }
+            String sourceCode = getText((StyledDocument)content);
 
             Input input = new CharSequenceInput(sourceCode);
             ListOutput acceptOutput = new ListOutput(new ArrayList<>());
@@ -137,8 +194,8 @@ public class Main {
         }
     }
 
-    private static void createExample(JTree overviewPanelActionsResources) {
-        DefaultMutableTreeNode examplePattern = newResource(overviewPanelActionsResources, (DefaultMutableTreeNode) overviewPanelActionsResources.getModel().getRoot());
+    private static void createExample(JTree overviewPanelActionsResources, ResourceStore resourceStore) {
+        DefaultMutableTreeNode examplePattern = newResource(overviewPanelActionsResources, resourceStore, (DefaultMutableTreeNode) overviewPanelActionsResources.getModel().getRoot());
         try {
             String text = new String(java.nio.file.Files.readAllBytes(Paths.get("src/parsers/Example")));
             ((Document)((Resource)examplePattern.getUserObject()).getContent()).insertString(0, text, null);
@@ -147,7 +204,7 @@ public class Main {
         } catch (IOException e) {
             e.printStackTrace();
         }
-        DefaultMutableTreeNode examplePatternExample = newResource(overviewPanelActionsResources, examplePattern);
+        DefaultMutableTreeNode examplePatternExample = newResource(overviewPanelActionsResources, resourceStore, examplePattern);
         try {
             String text = "HI THERE";
             ((Document)((Resource)examplePatternExample.getUserObject()).getContent()).insertString(0, text, null);
@@ -156,11 +213,11 @@ public class Main {
         }
     }
 
-    private static DefaultMutableTreeNode newResource(JTree overviewPanelActionsResources, DefaultMutableTreeNode parent) {
+    private static DefaultMutableTreeNode newResource(JTree overviewPanelActionsResources, ResourceStore resourceStore, DefaultMutableTreeNode parent) {
         DefaultMutableTreeNode parentResourceNode = (DefaultMutableTreeNode)parent;//(DefaultMutableTreeNode)overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
 
         DefaultMutableTreeNode resourceNode = new DefaultMutableTreeNode();
-        Resource resource = new AbstractResource() {
+        Resource resource = new AbstractResource(resourceStore) {
             @Override
             public Language getLanguage() {
                 return (Resource)((DefaultMutableTreeNode)resourceNode.getParent()).getUserObject();
@@ -202,6 +259,34 @@ public class Main {
         return resourceNode;
     }
 
+    private static JTree overviewPanelActionsResources;
+
+    private static String getText(StyledDocument document) {
+        // Should be for loop where i is update according to ce.getEndOffset() for non-component elements
+        StringBuilder textBuilder = new StringBuilder();
+        int i = 0;
+
+        while(i < document.getLength()) {
+            Element ce = document.getCharacterElement(i);
+
+            if (ce.getAttributes().containsAttribute(AbstractDocument.ElementNameAttribute, StyleConstants.ComponentElementName)) {
+                JLabel lblComp = (JLabel) StyleConstants.getComponent(ce.getAttributes());
+                textBuilder.append(lblComp.getText());
+                i++;
+            } else {
+                try {
+                    String textPart = document.getText(i, ce.getEndOffset() - i);
+                    textBuilder.append(textPart);
+                    i = ce.getEndOffset();
+                } catch (BadLocationException e1) {
+                    e1.printStackTrace();
+                }
+            }
+        }
+
+        return textBuilder.toString();
+    }
+
     public static void main(String[] args) throws Exception {
         ScriptEngineManager engineManager = new ScriptEngineManager();
 
@@ -209,7 +294,16 @@ public class Main {
 
         DefaultListModel<Resource> resources = new DefaultListModel<>();
 
-        Resource nashhornResource = new AbstractResource() {
+        ResourceStore resourceStore = new ResourceStore() {
+            @Override
+            public List<Resource> getAllResources() {
+                return (List<Resource>) Collections.list(
+                    ((DefaultMutableTreeNode) ((DefaultTreeModel) overviewPanelActionsResources.getModel()).getRoot()).breadthFirstEnumeration()
+                ).stream().map(x -> (Resource) ((DefaultMutableTreeNode)x).getUserObject()).map(Resource.class::cast).collect(Collectors.toList());
+            }
+        };
+
+        Resource nashhornResource = new AbstractResource(resourceStore) {
             @Override
             public void dettachFrom(Object content, JPanel panel) {
 
@@ -224,13 +318,12 @@ public class Main {
             public Object evaluate(Object content) {
                 try {
                     ScriptEngine engine = engineManager.getEngineByName("nashorn");
-                    String sourceCode = ((Document)content).getText(0, ((Document)content).getLength());
+
+                    String sourceCode = getText((StyledDocument)content);
                     engine.eval(sourceCode);
 
                     return ((Invocable)engine).invokeFunction("main");
                 } catch (ScriptException e) {
-                    e.printStackTrace();
-                } catch (BadLocationException e) {
                     e.printStackTrace();
                 } catch (NoSuchMethodException e) {
                     e.printStackTrace();
@@ -351,19 +444,22 @@ public class Main {
         });
         overviewPanelActionsLanguages.setDragEnabled(true);
         overviewPanelActionsLanguages.setDropMode(DropMode.ON);
-        JTree overviewPanelActionsResources = new JTree(new DefaultMutableTreeNode(nashhornResource));
+
+        overviewPanelActionsResources = new JTree(new DefaultMutableTreeNode(nashhornResource));
         overviewPanelActionsResources.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener() {
             @Override
             public void valueChanged(TreeSelectionEvent e) {
                 if (overviewPanelActionsResources.getSelectionCount() == 1) {
-                    DefaultMutableTreeNode resourceNode = (DefaultMutableTreeNode)overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
-                    Resource resource = (Resource)resourceNode.getUserObject();
+                    DefaultMutableTreeNode resourceNode = (DefaultMutableTreeNode) overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
+                    Resource resource = (Resource) resourceNode.getUserObject();
                     setResource(editorPanel, languages, resource);
                 } else {
                     setResource(editorPanel, languages, null);
                 }
             }
         });
+        overviewPanelActionsResources.setDragEnabled(true);
+        //overviewPanelActionsResources.setTransferHandler(new TransferHandler());
 
         setAsDropTarget(overviewPanelActionsResources, (component, language) -> {
             Resource resource = new Resource() {
@@ -471,13 +567,13 @@ public class Main {
                 if (overviewPanelActionsResources.getSelectionCount() == 1) {
                     DefaultMutableTreeNode parentResourceNode = (DefaultMutableTreeNode)overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
 
-                    newResource(overviewPanelActionsResources, parentResourceNode);
+                    newResource(overviewPanelActionsResources, resourceStore, parentResourceNode);
                 }
             }
         });
         contentPane.add(toolBar, BorderLayout.NORTH);
 
-        createExample(overviewPanelActionsResources);
+        createExample(overviewPanelActionsResources, resourceStore);
 
         frame.setVisible(true);
     }
