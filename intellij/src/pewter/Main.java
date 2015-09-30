@@ -9,10 +9,7 @@ import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 import javax.swing.*;
-import javax.swing.event.TreeModelEvent;
-import javax.swing.event.TreeModelListener;
-import javax.swing.event.TreeSelectionEvent;
-import javax.swing.event.TreeSelectionListener;
+import javax.swing.event.*;
 import javax.swing.text.*;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
@@ -26,10 +23,7 @@ import java.awt.dnd.DropTargetDragEvent;
 import java.awt.dnd.DropTargetDropEvent;
 import java.awt.dnd.DropTargetEvent;
 import java.awt.dnd.DropTargetListener;
-import java.awt.event.ActionEvent;
-import java.awt.event.InputEvent;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
+import java.awt.event.*;
 import java.awt.geom.RoundRectangle2D;
 import java.io.IOException;
 import java.nio.file.Paths;
@@ -47,7 +41,17 @@ public class Main {
         Object evaluate(Object content);
     }
 
+    private interface ResourceListener {
+        void nameChanged(Resource resource);
+    }
+
     private interface Resource extends Language {
+        void addListener(ResourceListener listener);
+        void removeListener(ResourceListener listener);
+        default Runnable bindListener(ResourceListener listener) {
+            addListener(listener);
+            return () -> removeListener(listener);
+        }
         Language getLanguage();
         String getName();
         void setName(String name);
@@ -68,13 +72,59 @@ public class Main {
         java.util.List<Resource> getAllResources();
     }
 
+    private static class ResourceNode extends DefaultMutableTreeNode {
+        public ResourceNode() { }
+
+        public ResourceNode(Resource resource) {
+            super(resource);
+        }
+
+        @Override
+        public void setUserObject(Object userObject) {
+            if(userObject instanceof String) {
+                ((Resource)getUserObject()).setName((String)userObject);
+            } else
+                super.setUserObject(userObject);
+        }
+    }
+
+    private static class ResourceView extends JLabel implements ResourceListener {
+        private Resource resource;
+
+        public ResourceView(Resource resource) {
+            this.resource = resource;
+            nameChanged(resource);
+            resource.addListener(this);
+        }
+
+        public void unbind() {
+            resource.removeListener(this);
+        }
+
+        @Override
+        public void nameChanged(Resource resource) {
+            setText(resource.getName());
+        }
+    }
+
     private static abstract class AbstractResource implements Resource {
         private ResourceStore resourceStore;
         private String name;
         private Object content;
+        private List<ResourceListener> listeners = new ArrayList<ResourceListener>();
 
         public AbstractResource(ResourceStore resourceStore) {
             this.resourceStore = resourceStore;
+        }
+
+        @Override
+        public void addListener(ResourceListener listener) {
+            listeners.add(listener);
+        }
+
+        @Override
+        public void removeListener(ResourceListener listener) {
+            listeners.remove(listener);
         }
 
         @Override
@@ -85,6 +135,7 @@ public class Main {
         @Override
         public void setName(String name) {
             this.name = name;
+            listeners.forEach(x -> x.nameChanged(this));
         }
 
         @Override
@@ -101,6 +152,19 @@ public class Main {
         public void attachTo(Object content, JPanel panel) {
             JTextPane textPane = new JTextPane();
             textPane.setDocument((Document) content);
+            ((DefaultStyledDocument)textPane.getStyledDocument()).setDocumentFilter(new DocumentFilter() {
+                @Override
+                public void remove(FilterBypass fb, int offset, int length) throws BadLocationException {
+                    Element ce = textPane.getStyledDocument().getCharacterElement(offset);
+
+                    if (ce.getAttributes().containsAttribute(AbstractDocument.ElementNameAttribute, StyleConstants.ComponentElementName)) {
+                        ResourceView lblComp = (ResourceView) StyleConstants.getComponent(ce.getAttributes());
+                        lblComp.unbind();
+                    }
+
+                    super.remove(fb, offset, length);
+                }
+            });
             textPane.getKeymap().addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, InputEvent.CTRL_MASK), new AbstractAction() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
@@ -110,34 +174,13 @@ public class Main {
                         candidateReferences.add(new AbstractAction(x.getName()) {
                             @Override
                             public void actionPerformed(ActionEvent e) {
-                                int pos = textPane.getCaretPosition();
+                                //int pos = textPane.getCaretPosition();
                                 //((DefaultStyledDocument)textPane.getDocument()).getParagraphElement(pos).
-                                JLabel lbl = new JLabel(x.getName());
+                                ResourceView lbl = new ResourceView(x);
                                 lbl.setAlignmentY(0.85f);
                                 lbl.setForeground(Color.BLUE);
                                 lbl.setFont(textPane.getFont());
                                 textPane.insertComponent(lbl);
-
-                                /*String fullText = IntStream.range(0, textPane.getDocument().getLength()).mapToObj(i -> {
-                                    Element ce = textPane.getStyledDocument().getCharacterElement(i);
-
-                                    if (ce.getAttributes().containsAttribute(AbstractDocument.ElementNameAttribute, StyleConstants.ComponentElementName)) {
-                                        JLabel lblComp = (JLabel) StyleConstants.getComponent(ce.getAttributes());
-                                        return lblComp.getText();
-                                    } else {
-                                        try {
-                                            return textPane.getDocument().getText(ce.getStartOffset(), ce.getEndOffset());
-                                        } catch (BadLocationException e1) {
-                                            e1.printStackTrace();
-                                        }
-                                    }
-
-                                    return null;
-                                }).collect(Collectors.joining());
-                                fullText.length();*/
-
-                                /*textPane.getEditorKit().
-                                textPane.getDocument().getRootElements()[0].*/
                             }
                         });
                     });
@@ -216,7 +259,7 @@ public class Main {
     private static DefaultMutableTreeNode newResource(JTree overviewPanelActionsResources, ResourceStore resourceStore, DefaultMutableTreeNode parent) {
         DefaultMutableTreeNode parentResourceNode = (DefaultMutableTreeNode)parent;//(DefaultMutableTreeNode)overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
 
-        DefaultMutableTreeNode resourceNode = new DefaultMutableTreeNode();
+        DefaultMutableTreeNode resourceNode = new ResourceNode();
         Resource resource = new AbstractResource(resourceStore) {
             @Override
             public Language getLanguage() {
@@ -366,7 +409,7 @@ public class Main {
 
         JPanel editorPanel = new JPanel(new BorderLayout());
 
-        setAsDropTarget(editorPanel, (component, language) -> {
+        /*setAsDropTarget(editorPanel, (component, language) -> {
             Resource resource = new Resource() {
                 String name = "Resource" + resources.size();
                 Object content = language.newContent();
@@ -422,7 +465,7 @@ public class Main {
             };
             resources.addElement(resource);
             setResource(editorPanel, languages, resource);
-        });
+        });*/
 
         JPanel overviewPanel = new JPanel(new BorderLayout());
         JPanel overviewPanelActions = new JPanel();
@@ -445,7 +488,7 @@ public class Main {
         overviewPanelActionsLanguages.setDragEnabled(true);
         overviewPanelActionsLanguages.setDropMode(DropMode.ON);
 
-        overviewPanelActionsResources = new JTree(new DefaultMutableTreeNode(nashhornResource));
+        overviewPanelActionsResources = new JTree(new ResourceNode(nashhornResource));
         overviewPanelActionsResources.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener() {
             @Override
             public void valueChanged(TreeSelectionEvent e) {
@@ -459,9 +502,34 @@ public class Main {
             }
         });
         overviewPanelActionsResources.setDragEnabled(true);
+        overviewPanelActionsResources.setEditable(true);
+        /*overviewPanelActionsResources.getModel().addTreeModelListener(new TreeModelListener() {
+            @Override
+            public void treeNodesChanged(TreeModelEvent e) {
+                DefaultMutableTreeNode treeNode = (DefaultMutableTreeNode)e.getTreePath().getLastPathComponent();
+                DefaultMutableTreeNode childTreeNode = (DefaultMutableTreeNode) treeNode.getChildAt(e.getChildIndices()[0]);
+                String resourceName = (Resource)childTreeNode.getUserObject();
+                resource.setName((String)childTreeNode.getUserObject());
+            }
+
+            @Override
+            public void treeNodesInserted(TreeModelEvent e) {
+
+            }
+
+            @Override
+            public void treeNodesRemoved(TreeModelEvent e) {
+
+            }
+
+            @Override
+            public void treeStructureChanged(TreeModelEvent e) {
+
+            }
+        });*/
         //overviewPanelActionsResources.setTransferHandler(new TransferHandler());
 
-        setAsDropTarget(overviewPanelActionsResources, (component, language) -> {
+        /*setAsDropTarget(overviewPanelActionsResources, (component, language) -> {
             Resource resource = new Resource() {
                 String name = "Resource" + resources.size();
                 Object content = language.newContent();
@@ -520,13 +588,8 @@ public class Main {
                 }
             };
             resources.addElement(resource);
-            /*if (overviewPanelActionsResources.editCellAt(resources.size() - 1, 0)) {
-                overviewPanelActionsResources.getEditorComponent().requestFocusInWindow();
-                ((JTextComponent) overviewPanelActionsResources.getEditorComponent()).selectAll();
-                overviewPanelActionsResources.setRowSelectionInterval(resources.size() - 1, resources.size() - 1);
-            }*/
             //setResource(editorPanel, languages, resource);
-        });
+        });*/
 
         JSplitPane overviewPanelSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, overviewPanelActionsLanguages, overviewPanelActionsResources);
         overviewPanelSplitPane.setResizeWeight(0.25);
