@@ -489,7 +489,7 @@ public class Main {
         overviewPanelActionsLanguages.setDropMode(DropMode.ON);
 
         overviewPanelActionsResources = new JTree(new ResourceNode(nashhornResource));
-        overviewPanelActionsResources.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener() {
+        /*overviewPanelActionsResources.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener() {
             @Override
             public void valueChanged(TreeSelectionEvent e) {
                 if (overviewPanelActionsResources.getSelectionCount() == 1) {
@@ -500,9 +500,24 @@ public class Main {
                     setResource(editorPanel, languages, null);
                 }
             }
+        });*/
+        overviewPanelActionsResources.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if(e.getClickCount() == 2) {
+                    if (overviewPanelActionsResources.getSelectionCount() == 1) {
+                        DefaultMutableTreeNode resourceNode = (DefaultMutableTreeNode) overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
+                        Resource resource = (Resource) resourceNode.getUserObject();
+                        setResource(editorPanel, languages, resource);
+                    } else {
+                        setResource(editorPanel, languages, null);
+                    }
+                }
+            }
         });
         overviewPanelActionsResources.setDragEnabled(true);
         overviewPanelActionsResources.setEditable(true);
+        overviewPanelActionsResources.setToggleClickCount(0);
         /*overviewPanelActionsResources.getModel().addTreeModelListener(new TreeModelListener() {
             @Override
             public void treeNodesChanged(TreeModelEvent e) {
