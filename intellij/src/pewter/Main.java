@@ -1,6 +1,7 @@
 package pewter;
 
 import com.sun.glass.events.KeyEvent;
+import jdk.nashorn.api.scripting.NashornScriptEngine;
 import jdk.nashorn.api.scripting.ScriptObjectMirror;
 
 import javax.activation.DataHandler;
@@ -14,7 +15,6 @@ import javax.swing.text.*;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeNode;
-import javax.swing.tree.TreePath;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
@@ -24,12 +24,12 @@ import java.awt.dnd.DropTargetDropEvent;
 import java.awt.dnd.DropTargetEvent;
 import java.awt.dnd.DropTargetListener;
 import java.awt.event.*;
-import java.awt.geom.RoundRectangle2D;
 import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -39,6 +39,7 @@ public class Main {
         void dettachFrom(Object content, JPanel panel);
         Object newContent();
         Object evaluate(Object content);
+        Object evaluateForUsage(Object content);
     }
 
     private interface ResourceListener {
@@ -55,10 +56,14 @@ public class Main {
         Language getLanguage();
         String getName();
         void setName(String name);
+        String getPath();
         Object getContent();
         void setContent(Object content);
         default Object evaluate() {
             return getLanguage().evaluate(getContent());
+        }
+        default Object evaluateForUsage() {
+            return getLanguage().evaluateForUsage(getContent());
         }
         default void attachTo(JPanel panel) {
             getLanguage().attachTo(getContent(), panel);
@@ -66,10 +71,12 @@ public class Main {
         default void detachFrom(JPanel panel) {
             getLanguage().dettachFrom(getContent(), panel);
         }
+
     }
 
     private interface ResourceStore {
         java.util.List<Resource> getAllResources();
+        Resource resolveResource(String path);
     }
 
     private static class ResourceNode extends DefaultMutableTreeNode {
@@ -212,6 +219,11 @@ public class Main {
         }
 
         @Override
+        public Object evaluateForUsage(Object content) {
+            return null;
+        }
+
+        @Override
         public Object evaluate(Object content) {
             ScriptObjectMirror evaluator = (ScriptObjectMirror)evaluate();
             String sourceCode = getText((StyledDocument)content);
@@ -238,8 +250,10 @@ public class Main {
     }
 
     private static void createExample(JTree overviewPanelActionsResources, ResourceStore resourceStore) {
-        DefaultMutableTreeNode examplePattern = newResource(overviewPanelActionsResources, resourceStore, (DefaultMutableTreeNode) overviewPanelActionsResources.getModel().getRoot());
+        DefaultMutableTreeNode nashornNode = (DefaultMutableTreeNode)((DefaultMutableTreeNode) overviewPanelActionsResources.getModel().getRoot()).getChildAt(0);
+        DefaultMutableTreeNode examplePattern = newResource(overviewPanelActionsResources, resourceStore, nashornNode);
         try {
+            ((Resource)examplePattern.getUserObject()).setName("Pattern");
             String text = new String(java.nio.file.Files.readAllBytes(Paths.get("src/parsers/Example")));
             ((Document)((Resource)examplePattern.getUserObject()).getContent()).insertString(0, text, null);
         } catch (BadLocationException e) {
@@ -264,6 +278,20 @@ public class Main {
             @Override
             public Language getLanguage() {
                 return (Resource)((DefaultMutableTreeNode)resourceNode.getParent()).getUserObject();
+            }
+
+            private String getPath(DefaultMutableTreeNode node) {
+                String name = ((Resource)node.getUserObject()).getName();
+
+                if(node.getParent() != null && ((DefaultMutableTreeNode)node.getParent()).getUserObject() instanceof Resource)
+                    return getPath((DefaultMutableTreeNode)node.getParent()) + "/" + name;
+
+                return name;
+            }
+
+            @Override
+            public String getPath() {
+                return getPath(resourceNode);
             }
         };
         resource.setContent(new DefaultStyledDocument());
@@ -313,12 +341,18 @@ public class Main {
             Element ce = document.getCharacterElement(i);
 
             if (ce.getAttributes().containsAttribute(AbstractDocument.ElementNameAttribute, StyleConstants.ComponentElementName)) {
-                JLabel lblComp = (JLabel) StyleConstants.getComponent(ce.getAttributes());
-                textBuilder.append(lblComp.getText());
+                ResourceView lblComp = (ResourceView) StyleConstants.getComponent(ce.getAttributes());
+                textBuilder.append(lblComp.resource.getPath());
                 i++;
             } else {
                 try {
-                    String textPart = document.getText(i, ce.getEndOffset() - i);
+                    int length =  ce.getEndOffset() - i;
+
+                    // Subtract difference if end offset is out of bounds
+                    if(ce.getEndOffset() > document.getLength())
+                        length -= ce.getEndOffset() - document.getLength();
+
+                    String textPart = document.getText(i, length);
                     textBuilder.append(textPart);
                     i = ce.getEndOffset();
                 } catch (BadLocationException e1) {
@@ -342,7 +376,24 @@ public class Main {
             public List<Resource> getAllResources() {
                 return (List<Resource>) Collections.list(
                     ((DefaultMutableTreeNode) ((DefaultTreeModel) overviewPanelActionsResources.getModel()).getRoot()).breadthFirstEnumeration()
-                ).stream().map(x -> (Resource) ((DefaultMutableTreeNode)x).getUserObject()).map(Resource.class::cast).collect(Collectors.toList());
+                ).stream()
+                    .filter(x -> ((DefaultMutableTreeNode) x).getUserObject() instanceof Resource)
+                    .map(x -> (Resource) ((DefaultMutableTreeNode)x).getUserObject()).map(Resource.class::cast).collect(Collectors.toList());
+            }
+
+            @Override
+            public Resource resolveResource(String path) {
+                String[] pathParts = path.split("/");
+
+                DefaultMutableTreeNode node = (DefaultMutableTreeNode)overviewPanelActionsResources.getModel().getRoot();
+
+                for(int i = 0; i < pathParts.length; i++) {
+                    String name = pathParts[i];
+                    node = (DefaultMutableTreeNode)Collections.list(node.children()).stream()
+                        .filter(x -> ((Resource) ((DefaultMutableTreeNode) x).getUserObject()).getName().equals(name)).findFirst().get();
+                }
+
+                return (Resource)node.getUserObject();
             }
         };
 
@@ -357,13 +408,61 @@ public class Main {
                 return new DefaultStyledDocument();
             }
 
-            @Override
-            public Object evaluate(Object content) {
+            private NashornScriptEngine evaluateWithEngine(Object content) {
                 try {
                     ScriptEngine engine = engineManager.getEngineByName("nashorn");
 
+                    engine.put("useFunction", new Function<String, Object>() {
+                        @Override
+                        public Object apply(String path) {
+                            /*String[] pathParts = path.split("/");
+
+                            DefaultMutableTreeNode node = (DefaultMutableTreeNode)overviewPanelActionsResources.getModel().getRoot();
+
+                            for(int i = 0; i < pathParts.length; i++) {
+                                String name = pathParts[i];
+                                node = (DefaultMutableTreeNode)Collections.list(node.children()).stream()
+                                    .filter(x -> ((Resource) ((DefaultMutableTreeNode) x).getUserObject()).getName().equals(name)).findFirst().get();
+                            }*/
+
+                            //Resource resource = resourceStore.getAllResources().stream().filter(x -> x.getName().equals(path)).findFirst().get();
+                            Resource resource = resourceStore.resolveResource(path);
+
+                            Object object = resource.evaluateForUsage();
+
+                            return object;
+                        }
+                    });
+                    engine.eval("function use(name) {return useFunction.apply(name);}");
+
                     String sourceCode = getText((StyledDocument)content);
                     engine.eval(sourceCode);
+
+                    return (NashornScriptEngine)engine;
+                } catch (ScriptException e) {
+                    e.printStackTrace();
+                }
+
+                return null;
+            }
+
+            @Override
+            public Object evaluateForUsage(Object content) {
+                try {
+                    ScriptEngine engine = evaluateWithEngine(content);
+
+                    return engine.eval("this");
+                } catch (ScriptException e) {
+                    e.printStackTrace();
+                }
+
+                return null;
+            }
+
+            @Override
+            public Object evaluate(Object content) {
+                try {
+                    ScriptEngine engine = evaluateWithEngine(content);
 
                     return ((Invocable)engine).invokeFunction("main");
                 } catch (ScriptException e) {
@@ -397,17 +496,27 @@ public class Main {
                     }
 
                     @Override
+                    public Object evaluateForUsage(Object content) {
+                        return content.toString();
+                    }
+
+                    @Override
                     public Object evaluate(Object content) {
                         return content.toString();
                     }
                 };
+            }
+
+            @Override
+            public String getPath() {
+                return "/";
             }
         };
         nashhornResource.setName("Nashorn");
         nashhornResource.setContent(nashhornResource.getLanguage().newContent());
         DefaultComboBoxModel<Language> languages = new DefaultComboBoxModel<>();
 
-        JPanel editorPanel = new JPanel(new BorderLayout());
+        JTabbedPane editorPanel = new JTabbedPane(/*new BorderLayout()*/);
 
         /*setAsDropTarget(editorPanel, (component, language) -> {
             Resource resource = new Resource() {
@@ -464,7 +573,7 @@ public class Main {
                 }
             };
             resources.addElement(resource);
-            setResource(editorPanel, languages, resource);
+            showResource(editorPanel, languages, resource);
         });*/
 
         JPanel overviewPanel = new JPanel(new BorderLayout());
@@ -488,29 +597,31 @@ public class Main {
         overviewPanelActionsLanguages.setDragEnabled(true);
         overviewPanelActionsLanguages.setDropMode(DropMode.ON);
 
-        overviewPanelActionsResources = new JTree(new ResourceNode(nashhornResource));
+        DefaultMutableTreeNode root = new DefaultMutableTreeNode(nashhornResource.getLanguage());
+        root.add(new ResourceNode(nashhornResource));
+        overviewPanelActionsResources = new JTree(root);
         /*overviewPanelActionsResources.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener() {
             @Override
             public void valueChanged(TreeSelectionEvent e) {
                 if (overviewPanelActionsResources.getSelectionCount() == 1) {
                     DefaultMutableTreeNode resourceNode = (DefaultMutableTreeNode) overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
                     Resource resource = (Resource) resourceNode.getUserObject();
-                    setResource(editorPanel, languages, resource);
+                    showResource(editorPanel, languages, resource);
                 } else {
-                    setResource(editorPanel, languages, null);
+                    showResource(editorPanel, languages, null);
                 }
             }
         });*/
         overviewPanelActionsResources.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                if(e.getClickCount() == 2) {
+                if (e.getClickCount() == 2) {
                     if (overviewPanelActionsResources.getSelectionCount() == 1) {
                         DefaultMutableTreeNode resourceNode = (DefaultMutableTreeNode) overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
                         Resource resource = (Resource) resourceNode.getUserObject();
-                        setResource(editorPanel, languages, resource);
+                        showResource(editorPanel, languages, resource);
                     } else {
-                        setResource(editorPanel, languages, null);
+                        showResource(editorPanel, languages, null);
                     }
                 }
             }
@@ -518,6 +629,7 @@ public class Main {
         overviewPanelActionsResources.setDragEnabled(true);
         overviewPanelActionsResources.setEditable(true);
         overviewPanelActionsResources.setToggleClickCount(0);
+        overviewPanelActionsResources.setRootVisible(false);
         /*overviewPanelActionsResources.getModel().addTreeModelListener(new TreeModelListener() {
             @Override
             public void treeNodesChanged(TreeModelEvent e) {
@@ -603,7 +715,7 @@ public class Main {
                 }
             };
             resources.addElement(resource);
-            //setResource(editorPanel, languages, resource);
+            //showResource(editorPanel, languages, resource);
         });*/
 
         JSplitPane overviewPanelSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, overviewPanelActionsLanguages, overviewPanelActionsResources);
@@ -630,9 +742,9 @@ public class Main {
         toolBar.add(new AbstractAction("Evaluate") {
             @Override
             public void actionPerformed(ActionEvent e) {
-                if (overviewPanelActionsResources.getSelectionCount() == 1) {
-                    DefaultMutableTreeNode resourceNode = (DefaultMutableTreeNode)overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
-                    Resource resource = (Resource)resourceNode.getUserObject();
+                Resource resource = getActiveResource(editorPanel);
+
+                if (resource != null) {
                     Language language = resource.getLanguage();
                     Object obj = language.evaluate(resource.getContent());
                     evaluationPanel.setText(obj.toString());
@@ -716,12 +828,64 @@ public class Main {
         });
     }
 
-    private static void setResource(JPanel editorPanel, ComboBoxModel<Language> languages, Resource resource) {
-        editorPanel.removeAll();
+    private static Resource getActiveResource(JTabbedPane editorPanel) {
+        if(editorPanel.getSelectedIndex() != -1) {
+            return ((ResourceView) ((JPanel) editorPanel.getTabComponentAt(editorPanel.getSelectedIndex())).getComponent(0)).resource;
+        }
+
+        return null;
+    }
+
+    private static void showResource(JTabbedPane editorPanel, ComboBoxModel<Language> languages, Resource resource) {
+        OptionalInt existingIndex = IntStream.range(0, editorPanel.getTabCount()).filter(i -> ((ResourceView) ((JPanel) editorPanel.getTabComponentAt(i)).getComponent(0)).resource == resource).findFirst();
+        int indexToSelect;
+
+        if(!existingIndex.isPresent()) {
+            JPanel tabContent = new JPanel(new BorderLayout());
+            resource.attachTo(tabContent);
+            editorPanel.addTab(resource.getName(), tabContent);
+            JPanel tabComponent = new JPanel(new BorderLayout());
+            ResourceView resourceView = new ResourceView(resource);
+            tabComponent.add(resourceView, BorderLayout.CENTER);
+            JButton closeButton = new JButton("X");
+            closeButton.setOpaque(false);
+            closeButton.setContentAreaFilled(false);
+            closeButton.setBorderPainted(false);
+            closeButton.addActionListener(e -> {
+                int index = editorPanel.indexOfTabComponent(tabComponent);
+                editorPanel.removeTabAt(index);
+                resourceView.unbind();
+            });
+            tabComponent.add(closeButton, BorderLayout.EAST);
+            editorPanel.setTabComponentAt(editorPanel.getTabCount() - 1, tabComponent);
+            indexToSelect = editorPanel.getTabCount() - 1;
+        } else {
+            indexToSelect = existingIndex.getAsInt();
+        }
+
+        editorPanel.setSelectedIndex(indexToSelect);
+
+        /*resource.addListener(new ResourceListener() {
+            @Override
+            public void nameChanged(Resource resource) {
+            }
+        });
+
+        editorPanel.setModel(new DefaultSingleSelectionModel());
+
+        editorPanel.addChangeListener(new ChangeListener() {
+            @Override
+            public void stateChanged(ChangeEvent e) {
+
+            }
+        });*/
+
+        /*editorPanel.removeAll();
 
         if(resource != null) {
+
             resource.attachTo(editorPanel);
-        }
+        }*/
 
         editorPanel.revalidate();
         editorPanel.repaint();
