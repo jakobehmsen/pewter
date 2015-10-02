@@ -1,0 +1,5 @@
+function loadProject(node) {
+    node.getResource("Nashorn").addResource("Pattern", "Pattern content")
+    node.getResource("Nashorn").addResource("Lisp", "Lisp content")
+    node.getResource("Nashorn").getResource("Lisp").addResource("LispApp", "LispApp content")
+}

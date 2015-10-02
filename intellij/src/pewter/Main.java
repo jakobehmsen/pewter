@@ -14,7 +14,7 @@ import javax.swing.event.*;
 import javax.swing.text.*;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
-import javax.swing.tree.TreeNode;
+import javax.swing.tree.TreePath;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
@@ -25,6 +25,7 @@ import java.awt.dnd.DropTargetEvent;
 import java.awt.dnd.DropTargetListener;
 import java.awt.event.*;
 import java.io.IOException;
+import java.io.Reader;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.List;
@@ -34,68 +35,8 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 public class Main {
-    private interface Language {
-        void attachTo(Object content, JPanel panel);
-        void dettachFrom(Object content, JPanel panel);
-        Object newContent();
-        Object evaluate(Object content);
-        Object evaluateForUsage(Object content);
-    }
 
-    private interface ResourceListener {
-        void nameChanged(Resource resource);
-    }
-
-    private interface Resource extends Language {
-        void addListener(ResourceListener listener);
-        void removeListener(ResourceListener listener);
-        default Runnable bindListener(ResourceListener listener) {
-            addListener(listener);
-            return () -> removeListener(listener);
-        }
-        Language getLanguage();
-        String getName();
-        void setName(String name);
-        String getPath();
-        Object getContent();
-        void setContent(Object content);
-        default Object evaluate() {
-            return getLanguage().evaluate(getContent());
-        }
-        default Object evaluateForUsage() {
-            return getLanguage().evaluateForUsage(getContent());
-        }
-        default void attachTo(JPanel panel) {
-            getLanguage().attachTo(getContent(), panel);
-        }
-        default void detachFrom(JPanel panel) {
-            getLanguage().dettachFrom(getContent(), panel);
-        }
-
-    }
-
-    private interface ResourceStore {
-        java.util.List<Resource> getAllResources();
-        Resource resolveResource(String path);
-    }
-
-    private static class ResourceNode extends DefaultMutableTreeNode {
-        public ResourceNode() { }
-
-        public ResourceNode(Resource resource) {
-            super(resource);
-        }
-
-        @Override
-        public void setUserObject(Object userObject) {
-            if(userObject instanceof String) {
-                ((Resource)getUserObject()).setName((String)userObject);
-            } else
-                super.setUserObject(userObject);
-        }
-    }
-
-    private static class ResourceView extends JLabel implements ResourceListener {
+    public static class ResourceView extends JLabel implements ResourceListener {
         private Resource resource;
 
         public ResourceView(Resource resource) {
@@ -271,31 +212,45 @@ public class Main {
     }
 
     private static DefaultMutableTreeNode newResource(JTree overviewPanelActionsResources, ResourceStore resourceStore, DefaultMutableTreeNode parent) {
+        String name = "Example" + (parent.getChildCount() + 1);
+        return newResource(overviewPanelActionsResources, resourceStore, parent, name);
+    }
+
+    public static class TreeNodeResource extends AbstractResource {
+        private DefaultMutableTreeNode resourceNode;
+
+        public TreeNodeResource(ResourceStore resourceStore, DefaultMutableTreeNode resourceNode) {
+            super(resourceStore);
+            this.resourceNode = resourceNode;
+        }
+
+        @Override
+        public Language getLanguage() {
+            return (Resource)((DefaultMutableTreeNode)resourceNode.getParent()).getUserObject();
+        }
+
+        private String getPath(DefaultMutableTreeNode node) {
+            String name = ((Resource)node.getUserObject()).getName();
+
+            if(node.getParent() != null && ((DefaultMutableTreeNode)node.getParent()).getUserObject() instanceof Resource)
+                return getPath((DefaultMutableTreeNode)node.getParent()) + "/" + name;
+
+            return name;
+        }
+
+        @Override
+        public String getPath() {
+            return getPath(resourceNode);
+        }
+    }
+
+    private static DefaultMutableTreeNode newResource(JTree overviewPanelActionsResources, ResourceStore resourceStore, DefaultMutableTreeNode parent, String name) {
         DefaultMutableTreeNode parentResourceNode = (DefaultMutableTreeNode)parent;//(DefaultMutableTreeNode)overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
 
         DefaultMutableTreeNode resourceNode = new ResourceNode();
-        Resource resource = new AbstractResource(resourceStore) {
-            @Override
-            public Language getLanguage() {
-                return (Resource)((DefaultMutableTreeNode)resourceNode.getParent()).getUserObject();
-            }
-
-            private String getPath(DefaultMutableTreeNode node) {
-                String name = ((Resource)node.getUserObject()).getName();
-
-                if(node.getParent() != null && ((DefaultMutableTreeNode)node.getParent()).getUserObject() instanceof Resource)
-                    return getPath((DefaultMutableTreeNode)node.getParent()) + "/" + name;
-
-                return name;
-            }
-
-            @Override
-            public String getPath() {
-                return getPath(resourceNode);
-            }
-        };
+        Resource resource = new TreeNodeResource(resourceStore, resourceNode);
         resource.setContent(new DefaultStyledDocument());
-        resource.setName("Example" + (parentResourceNode.getChildCount() + 1));
+        resource.setName(name);
         resourceNode.setUserObject(resource);
 
         overviewPanelActionsResources.getModel().addTreeModelListener(new TreeModelListener() {
@@ -739,6 +694,56 @@ public class Main {
 
         JToolBar toolBar = new JToolBar();
 
+        toolBar.add(new AbstractAction("Open") {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                final JFileChooser fc = new JFileChooser();
+                if(fc.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
+                    String filePath = fc.getSelectedFile().getAbsolutePath();
+
+                    NashornScriptEngine projectEngine = (NashornScriptEngine) engineManager.getEngineByName("Nashorn");
+
+                    try {
+                        Reader projectReader = java.nio.file.Files.newBufferedReader(Paths.get(filePath));
+
+                        projectEngine.eval(projectReader);
+
+                        //ScriptObjectMirror projectObject = (ScriptObjectMirror) projectEngine.invokeFunction("main");
+
+                        ScriptObjectMirror projectObject = (ScriptObjectMirror) projectEngine.eval("this");
+
+                        DefaultMutableTreeNode root = (DefaultMutableTreeNode)overviewPanelActionsResources.getModel().getRoot();
+
+                        root.removeAllChildren();
+                        root.add(new ResourceNode(nashhornResource));
+
+                        ProjectResource projectResource = new DefaultProjectResource(resourceStore, root);
+
+                        //projectEngine.invokeMethod(projectEngine, "loadProject", projectResource);
+                        Object ret = projectObject.callMember("loadProject", projectResource);
+
+                        ((DefaultTreeModel)overviewPanelActionsResources.getModel()).reload();
+                        overviewPanelActionsResources.revalidate();
+                        overviewPanelActionsResources.repaint();
+
+                        overviewPanelActionsResources.expandPath(new TreePath(((DefaultTreeModel)overviewPanelActionsResources.getModel()).getPathToRoot(root.getChildAt(0))));
+                        /*((DefaultTreeModel)overviewPanelActionsResources.getModel()).nodeChanged(root);
+                        ((DefaultTreeModel)overviewPanelActionsResources.getModel()).nodeStructureChanged(root);*/
+
+                        /*ScriptObjectMirror resources = (ScriptObjectMirror)projectObject.callMember("getResources");
+                        resources.values().stream().forEach(x -> {
+                            String path = (String)((ScriptObjectMirror)x).callMember("getPath");
+                            String content = (String)((ScriptObjectMirror)x).callMember("content");
+                            
+                        });*/
+                    } catch (IOException e1) {
+                        e1.printStackTrace();
+                    } catch (ScriptException e1) {
+                        e1.printStackTrace();
+                    }
+                }
+            }
+        });
         toolBar.add(new AbstractAction("Evaluate") {
             @Override
             public void actionPerformed(ActionEvent e) {
