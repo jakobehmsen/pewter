@@ -26,6 +26,7 @@ import java.awt.dnd.DropTargetListener;
 import java.awt.event.*;
 import java.io.IOException;
 import java.io.Reader;
+import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.List;
@@ -694,11 +695,46 @@ public class Main {
 
         JToolBar toolBar = new JToolBar();
 
+        Arrays.asList(Paths.get("projecttemplates").toFile().listFiles()).forEach(f -> {
+            try {
+                Reader reader = Files.newBufferedReader(Paths.get(f.getAbsolutePath()));
+
+                ScriptEngine scriptEngine = engineManager.getEngineByName("Nashorn");
+
+                scriptEngine.eval(reader);
+                ScriptObjectMirror projectDriver = (ScriptObjectMirror)scriptEngine.eval("this");
+
+                String name = (String)projectDriver.callMember("getName");
+
+                toolBar.add(new AbstractAction("Open " + name) {
+                    @Override
+                    public void actionPerformed(ActionEvent e) {
+                        DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode();
+
+                        DefaultMutableTreeNode nashornNode = new DefaultMutableTreeNode(nashhornResource);
+                        rootNode.add(nashornNode);
+
+                        DefaultProjectResource rootResource = new DefaultProjectResource(resourceStore, rootNode);
+
+                        boolean couldOpen = (boolean)projectDriver.callMember("open", root);
+
+                        if(couldOpen) {
+
+                        }
+                    }
+                });
+            } catch (IOException e) {
+                e.printStackTrace();
+            } catch (ScriptException e) {
+                e.printStackTrace();
+            }
+        });
+
         toolBar.add(new AbstractAction("Open") {
             @Override
             public void actionPerformed(ActionEvent e) {
                 final JFileChooser fc = new JFileChooser();
-                if(fc.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
+                if (fc.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
                     String filePath = fc.getSelectedFile().getAbsolutePath();
 
                     NashornScriptEngine projectEngine = (NashornScriptEngine) engineManager.getEngineByName("Nashorn");
@@ -712,7 +748,7 @@ public class Main {
 
                         ScriptObjectMirror projectObject = (ScriptObjectMirror) projectEngine.eval("this");
 
-                        DefaultMutableTreeNode root = (DefaultMutableTreeNode)overviewPanelActionsResources.getModel().getRoot();
+                        DefaultMutableTreeNode root = (DefaultMutableTreeNode) overviewPanelActionsResources.getModel().getRoot();
 
                         root.removeAllChildren();
                         root.add(new ResourceNode(nashhornResource));
@@ -722,11 +758,11 @@ public class Main {
                         //projectEngine.invokeMethod(projectEngine, "loadProject", projectResource);
                         Object ret = projectObject.callMember("loadProject", projectResource);
 
-                        ((DefaultTreeModel)overviewPanelActionsResources.getModel()).reload();
+                        ((DefaultTreeModel) overviewPanelActionsResources.getModel()).reload();
                         overviewPanelActionsResources.revalidate();
                         overviewPanelActionsResources.repaint();
 
-                        overviewPanelActionsResources.expandPath(new TreePath(((DefaultTreeModel)overviewPanelActionsResources.getModel()).getPathToRoot(root.getChildAt(0))));
+                        overviewPanelActionsResources.expandPath(new TreePath(((DefaultTreeModel) overviewPanelActionsResources.getModel()).getPathToRoot(root.getChildAt(0))));
                         /*((DefaultTreeModel)overviewPanelActionsResources.getModel()).nodeChanged(root);
                         ((DefaultTreeModel)overviewPanelActionsResources.getModel()).nodeStructureChanged(root);*/
 

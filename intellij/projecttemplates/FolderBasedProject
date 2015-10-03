@@ -1,0 +1,46 @@
+Paths = Java.type("java.nio.file.Path");
+Files = Java.type("java.nio.file.Files");
+String = Java.type("java.lang.String");
+JFileChooser = Java.type("javax.swing.JFileChooser");
+
+function getName() {
+    return "Folder based project";
+}
+
+function open(node) {
+    var fc = new JFileChooser();
+
+    if (fc.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+
+    }
+
+    return false;
+}
+
+function loadProject(node) {
+    var projectPath = Paths.get(__FILE__);
+
+    StreamSupport.stream(projectPath.spliterator(), false)
+        .where(function(p) {return p.toFile().isDirectory()})
+        .forEach(function(p /*e.g. Nashorn*/) {
+            var resourceNode = node.getResource(p.getName(p.getNameCount() - 1))
+
+            loadDir(resourceNode, p)
+        });
+}
+
+function loadDir(node, dirPath) {
+    StreamSupport.stream(dirPath.spliterator(), false)
+        .where(function(p) {return p.toFile().isFile()})
+        .forEach(function(p) {
+            var name = p.getName(p.getNameCount() - 1)
+            var text = new String(Files.readAllBytes(p))
+            node.add(name, text)
+            var resourceNode = node.getResource(name)
+
+            var implementorsPath = Paths.get(p.toAbsolutePath().toString(), "-implementors")
+            if(implementorsPath.toFile().exists()) {
+                loadDir(resourceNode, p)
+            }
+        });
+}
