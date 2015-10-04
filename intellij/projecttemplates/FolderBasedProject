@@ -1,46 +1,96 @@
-Paths = Java.type("java.nio.file.Path");
-Files = Java.type("java.nio.file.Files");
-String = Java.type("java.lang.String");
-JFileChooser = Java.type("javax.swing.JFileChooser");
+Paths = Java.type("java.nio.file.Paths")
+Files = Java.type("java.nio.file.Files")
+File = Java.type("java.io.File")
+String = Java.type("java.lang.String")
+StreamSupport = Java.type("java.util.stream.StreamSupport")
+JFileChooser = Java.type("javax.swing.JFileChooser")
+Arrays = Java.type("java.util.Arrays")
+Math = Java.type("java.lang.Math")
+ScriptEngineManager = Java.type("javax.script.ScriptEngineManager")
 
 function getName() {
-    return "Folder based project";
+    return "Folder based project"
 }
 
 function open(node) {
-    var fc = new JFileChooser();
+    var fc = new JFileChooser()
+    fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY)
 
     if (fc.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-
+        var filePath = fc.getSelectedFile().getAbsolutePath()
+        loadProject(node, filePath)
+        return true
     }
 
-    return false;
+    return false
 }
 
-function loadProject(node) {
-    var projectPath = Paths.get(__FILE__);
+function evalInContext(js, context) {
+    //# Return the results of the in-line anonymous function we .call with the passed context
+    return function() { return eval(js); }.call(context);
+}
 
-    StreamSupport.stream(projectPath.spliterator(), false)
-        .where(function(p) {return p.toFile().isDirectory()})
-        .forEach(function(p /*e.g. Nashorn*/) {
-            var resourceNode = node.getResource(p.getName(p.getNameCount() - 1))
+function loadProject(node, file) {
+    var filter
+    if(Paths.get(file, "filter").toFile().exists()) {
+        print("filter exists")
+        var filterScript = new String(Files.readAllBytes(Paths.get(file, "filter")))
+        //var filterReader = Files.newBufferedReader(Paths.get(file.getAbsolutePath(), "filter"))
+        //var engine = ScriptEngineManager.getEngineByName("Nashorn")
+        //engine.eval(filterReader)
+        //engine.
+        /*var filterObject = {
+            evalInContext: function() {
+                eval(filterScript)
+            }
+        }
+        //filterObject.evalInContext.call(filterObject);*/
+        //var filterObject = {}
+        //evalInContext(filterScript, filterObject)
+        //eval.call({x: 2}, "print(this.x)");
+        var filterObject = loadWithNewGlobal({
+            name: "filterObject",
+            script: filterScript + "\nthis"
+        })
+        //eval(filterScript, filterObject)
+        //var filterObject = {}
+        //eval.call(filterObject, filterScript)
+        //eval.apply(filterObject, [filterScript])
+        //eval(filterScript, filterObject)
+        print(filterObject)
+        print(filterObject.acceptsFile)
+        print(acceptsFile)
+        filter = function(f) {return true}
+    } else {
+        filter = function(f) {return true}
+    }
 
-            loadDir(resourceNode, p)
+    Arrays.asList(new File(file).listFiles()).stream()
+        .filter(function(f) {return f.isDirectory()})
+        .forEach(function(f /*e.g. Nashorn*/) {
+            print(f.getAbsolutePath())
+            var resourceNode = node.getResource(f.getName())
+
+            loadDir(resourceNode, f)
         });
 }
 
-function loadDir(node, dirPath) {
-    StreamSupport.stream(dirPath.spliterator(), false)
-        .where(function(p) {return p.toFile().isFile()})
-        .forEach(function(p) {
-            var name = p.getName(p.getNameCount() - 1)
-            var text = new String(Files.readAllBytes(p))
-            node.add(name, text)
+function loadDir(node, dirPath, filter) {
+    Arrays.asList(new File(dirPath).listFiles()).stream()
+        .filter(function(f) {return f.isFile()})
+        .forEach(function(f) {
+            print("file: " + f.getAbsolutePath())
+
+            var text = new String(Files.readAllBytes(Paths.get(f.getAbsolutePath())))
+            //var name = f.getName().substring(0, Math.max(f.getName().indexOf("."), f.getName().length()));
+            var name = f.getName().replaceFirst("[.][^.]+$", "")
+            node.addResource(name, text)
             var resourceNode = node.getResource(name)
 
-            var implementorsPath = Paths.get(p.toAbsolutePath().toString(), "-implementors")
-            if(implementorsPath.toFile().exists()) {
-                loadDir(resourceNode, p)
+            var implementorsPath = Paths.get(f.getParentFile().getAbsolutePath(), name +"-implementors").toFile()
+            if(implementorsPath.exists()) {
+                print(implementorsPath)
+                loadDir(resourceNode, implementorsPath)
             }
         });
 }

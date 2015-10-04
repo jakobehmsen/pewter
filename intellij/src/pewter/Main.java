@@ -709,17 +709,26 @@ public class Main {
                 toolBar.add(new AbstractAction("Open " + name) {
                     @Override
                     public void actionPerformed(ActionEvent e) {
-                        DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode();
+                        DefaultMutableTreeNode rootNode = (DefaultMutableTreeNode)overviewPanelActionsResources.getModel().getRoot();//new DefaultMutableTreeNode();
 
-                        DefaultMutableTreeNode nashornNode = new DefaultMutableTreeNode(nashhornResource);
+                        rootNode.removeAllChildren();
+
+                        DefaultMutableTreeNode nashornNode = new ResourceNode(nashhornResource);
                         rootNode.add(nashornNode);
 
                         DefaultProjectResource rootResource = new DefaultProjectResource(resourceStore, rootNode);
 
-                        boolean couldOpen = (boolean)projectDriver.callMember("open", root);
+                        boolean couldOpen = (boolean)projectDriver.callMember("open", rootResource);
 
                         if(couldOpen) {
+                            //((DefaultTreeModel) overviewPanelActionsResources.getModel()).setRoot(rootNode);
+                            //((DefaultTreeModel) overviewPanelActionsResources.getModel()).nodeChanged(rootNode);
+                            //((DefaultTreeModel) overviewPanelActionsResources.getModel()).nodeStructureChanged(rootNode);
+                            ((DefaultTreeModel) overviewPanelActionsResources.getModel()).reload();
+                            overviewPanelActionsResources.revalidate();
+                            overviewPanelActionsResources.repaint();
 
+                            overviewPanelActionsResources.expandPath(new TreePath(((DefaultTreeModel) overviewPanelActionsResources.getModel()).getPathToRoot(root.getChildAt(0))));
                         }
                     }
                 });
