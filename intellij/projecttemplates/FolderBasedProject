@@ -25,42 +25,55 @@ function open(node) {
     return false
 }
 
-function evalInContext(js, context) {
-    //# Return the results of the in-line anonymous function we .call with the passed context
-    return function() { return eval(js); }.call(context);
-}
+var ResourceDriver = Java.type("pewter.ResourceDriver");
+var MyResourceDriver = Java.extend(ResourceDriver/*, {
+    myName: java.lang.String,
+    setMyName: function(myName) {
+        print("setMyName:" + myName);
+        this.myName = myName
+    },
+    text: java.lang.String,
+    basePath: java.lang.String,
+    addResource: function(name, text) {
+        var driver = new MyResourceDriver();
+        driver.myName = name;
+        driver.text = text;
+        return driver;
+    },
+    removeResource: function(name) {
+
+    },
+    path: function() {
+        if(parent !== undefined)
+            parent.path() + "/" + name
+        return basePath + "/" + name
+    },
+    setName: function(name) {
+        print("setName:" + name);
+        var oldPath = Paths.get(parent.path(), myName)
+        var newPath = Paths.get(parent.path(), name)
+        Files.move(oldPath, newPath)
+        var oldPathImplementors = Paths.get(parent.path(), myName + "-implementors")
+        var newPathImplementors = Paths.get(parent.path(), name + "-implementors")
+        Files.move(oldPathImplementors, newPathImplementors)
+
+        myName = name
+    },
+    setText: function(text) {
+
+    }
+}*/);
 
 function loadProject(node, file) {
     var filter
     if(Paths.get(file, "filter").toFile().exists()) {
         print("filter exists")
         var filterScript = new String(Files.readAllBytes(Paths.get(file, "filter")))
-        //var filterReader = Files.newBufferedReader(Paths.get(file.getAbsolutePath(), "filter"))
-        //var engine = ScriptEngineManager.getEngineByName("Nashorn")
-        //engine.eval(filterReader)
-        //engine.
-        /*var filterObject = {
-            evalInContext: function() {
-                eval(filterScript)
-            }
-        }
-        //filterObject.evalInContext.call(filterObject);*/
-        //var filterObject = {}
-        //evalInContext(filterScript, filterObject)
-        //eval.call({x: 2}, "print(this.x)");
         var filterObject = loadWithNewGlobal({
             name: "filterObject",
             script: filterScript + "\nthis"
         })
-        //eval(filterScript, filterObject)
-        //var filterObject = {}
-        //eval.call(filterObject, filterScript)
-        //eval.apply(filterObject, [filterScript])
-        //eval(filterScript, filterObject)
-        print(filterObject)
-        print(filterObject.acceptsFile)
-        print(acceptsFile)
-        filter = function(f) {return true}
+        filter = filterObject.acceptsFile
     } else {
         filter = function(f) {return true}
     }
@@ -70,27 +83,75 @@ function loadProject(node, file) {
         .forEach(function(f /*e.g. Nashorn*/) {
             print(f.getAbsolutePath())
             var resourceNode = node.getResource(f.getName())
+            // TODO: Set top level driver
+            print("create driver");
+            var driverInstance = {myName:"", text:"", basePath:"",
+                addResource: function(name, text) {
+                    var driver = new MyResourceDriver();
+                    driver.myName = name;
+                    driver.text = text;
+                    return driver;
+                },
+                removeResource: function(name) {
 
-            loadDir(resourceNode, f)
+                },
+                path: function() {
+                    if(parent !== undefined)
+                        parent.path() + "/" + name
+                    return basePath + "/" + name
+                },
+                setName: function(name) {
+                    print("setName:" + name);
+                    var oldPath = Paths.get(parent.path(), myName)
+                    var newPath = Paths.get(parent.path(), name)
+                    Files.move(oldPath, newPath)
+                    var oldPathImplementors = Paths.get(parent.path(), myName + "-implementors")
+                    var newPathImplementors = Paths.get(parent.path(), name + "-implementors")
+                    Files.move(oldPathImplementors, newPathImplementors)
+
+                    myName = name
+                },
+                setText: function(text) {
+
+                }
+            };
+            var driver = new MyResourceDriver(driverInstance);
+            print("created driver");
+            print("setting name");
+            driverInstance.myName = f.getName();
+            print("driverInstance.myName:" + driverInstance.myName);
+            //driverInstance.setMyName(f.getName());
+            print("set name");
+            driverInstance.basePath = f.getParentFile().getAbsolutePath();
+            print("basePath:" + f.getParentFile().getAbsolutePath());
+            print("basePath:" + driver.basePath);
+            //driver.text = text;
+            resourceNode.setDriver(driver);
+
+            loadDir(resourceNode, f, filter)
         });
 }
 
 function loadDir(node, dirPath, filter) {
     Arrays.asList(new File(dirPath).listFiles()).stream()
-        .filter(function(f) {return f.isFile()})
+        .filter(function(f) {return f.isFile() && filter(f)})
         .forEach(function(f) {
             print("file: " + f.getAbsolutePath())
 
             var text = new String(Files.readAllBytes(Paths.get(f.getAbsolutePath())))
-            //var name = f.getName().substring(0, Math.max(f.getName().indexOf("."), f.getName().length()));
             var name = f.getName().replaceFirst("[.][^.]+$", "")
             node.addResource(name, text)
             var resourceNode = node.getResource(name)
+            var driver = new MyResourceDriver();
+            driver.myName = f.getName();
+            driver.text = text;
+            resourceNode.setDriver(driver);
+            // TODO: Set driver
 
             var implementorsPath = Paths.get(f.getParentFile().getAbsolutePath(), name +"-implementors").toFile()
             if(implementorsPath.exists()) {
                 print(implementorsPath)
-                loadDir(resourceNode, implementorsPath)
+                loadDir(resourceNode, implementorsPath, filter)
             }
         });
 }

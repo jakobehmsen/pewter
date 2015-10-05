@@ -57,6 +57,7 @@ public class Main {
     }
 
     private static abstract class AbstractResource implements Resource {
+        private ResourceDriver driver;
         private ResourceStore resourceStore;
         private String name;
         private Object content;
@@ -186,6 +187,16 @@ public class Main {
         }
 
         @Override
+        public ResourceDriver getDriver() {
+            return driver;
+        }
+
+        @Override
+        public void setDriver(ResourceDriver driver) {
+            this.driver = driver;
+        }
+
+        @Override
         public String toString() {
             return getName();
         }
@@ -219,10 +230,10 @@ public class Main {
 
     public static class TreeNodeResource extends AbstractResource {
         private DefaultMutableTreeNode resourceNode;
-
-        public TreeNodeResource(ResourceStore resourceStore, DefaultMutableTreeNode resourceNode) {
+        public TreeNodeResource(ResourceStore resourceStore, DefaultMutableTreeNode resourceNode, ResourceDriver driver) {
             super(resourceStore);
             this.resourceNode = resourceNode;
+            setDriver(driver);
         }
 
         @Override
@@ -248,8 +259,10 @@ public class Main {
     private static DefaultMutableTreeNode newResource(JTree overviewPanelActionsResources, ResourceStore resourceStore, DefaultMutableTreeNode parent, String name) {
         DefaultMutableTreeNode parentResourceNode = (DefaultMutableTreeNode)parent;//(DefaultMutableTreeNode)overviewPanelActionsResources.getSelectionPath().getLastPathComponent();
 
+        ResourceDriver driver = ((Resource)parentResourceNode.getUserObject()).getDriver().addResource(name, "");
+
         DefaultMutableTreeNode resourceNode = new ResourceNode();
-        Resource resource = new TreeNodeResource(resourceStore, resourceNode);
+        Resource resource = new TreeNodeResource(resourceStore, resourceNode, driver);
         resource.setContent(new DefaultStyledDocument());
         resource.setName(name);
         resourceNode.setUserObject(resource);
@@ -702,14 +715,14 @@ public class Main {
                 ScriptEngine scriptEngine = engineManager.getEngineByName("Nashorn");
 
                 scriptEngine.eval(reader);
-                ScriptObjectMirror projectDriver = (ScriptObjectMirror)scriptEngine.eval("this");
+                ScriptObjectMirror projectDriver = (ScriptObjectMirror) scriptEngine.eval("this");
 
-                String name = (String)projectDriver.callMember("getName");
+                String name = (String) projectDriver.callMember("getName");
 
                 toolBar.add(new AbstractAction("Open " + name) {
                     @Override
                     public void actionPerformed(ActionEvent e) {
-                        DefaultMutableTreeNode rootNode = (DefaultMutableTreeNode)overviewPanelActionsResources.getModel().getRoot();//new DefaultMutableTreeNode();
+                        DefaultMutableTreeNode rootNode = (DefaultMutableTreeNode) overviewPanelActionsResources.getModel().getRoot();//new DefaultMutableTreeNode();
 
                         rootNode.removeAllChildren();
 
@@ -718,9 +731,9 @@ public class Main {
 
                         DefaultProjectResource rootResource = new DefaultProjectResource(resourceStore, rootNode);
 
-                        boolean couldOpen = (boolean)projectDriver.callMember("open", rootResource);
+                        boolean couldOpen = (boolean) projectDriver.callMember("open", rootResource);
 
-                        if(couldOpen) {
+                        if (couldOpen) {
                             //((DefaultTreeModel) overviewPanelActionsResources.getModel()).setRoot(rootNode);
                             //((DefaultTreeModel) overviewPanelActionsResources.getModel()).nodeChanged(rootNode);
                             //((DefaultTreeModel) overviewPanelActionsResources.getModel()).nodeStructureChanged(rootNode);
@@ -813,7 +826,7 @@ public class Main {
         });
         contentPane.add(toolBar, BorderLayout.NORTH);
 
-        createExample(overviewPanelActionsResources, resourceStore);
+        //createExample(overviewPanelActionsResources, resourceStore);
 
         frame.setVisible(true);
     }

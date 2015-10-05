@@ -43,4 +43,7 @@ public interface Resource extends Language {
         getLanguage().dettachFrom(getContent(), panel);
     }
 
+    ResourceDriver getDriver();
+
+    void setDriver(ResourceDriver driver);
 }
