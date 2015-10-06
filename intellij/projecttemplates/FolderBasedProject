@@ -25,44 +25,47 @@ function open(node) {
     return false
 }
 
-var ResourceDriver = Java.type("pewter.ResourceDriver");
-var MyResourceDriver = Java.extend(ResourceDriver/*, {
-    myName: java.lang.String,
-    setMyName: function(myName) {
-        print("setMyName:" + myName);
-        this.myName = myName
-    },
-    text: java.lang.String,
-    basePath: java.lang.String,
-    addResource: function(name, text) {
-        var driver = new MyResourceDriver();
-        driver.myName = name;
-        driver.text = text;
-        return driver;
-    },
-    removeResource: function(name) {
 
-    },
-    path: function() {
-        if(parent !== undefined)
-            parent.path() + "/" + name
-        return basePath + "/" + name
-    },
-    setName: function(name) {
-        print("setName:" + name);
-        var oldPath = Paths.get(parent.path(), myName)
-        var newPath = Paths.get(parent.path(), name)
-        Files.move(oldPath, newPath)
-        var oldPathImplementors = Paths.get(parent.path(), myName + "-implementors")
-        var newPathImplementors = Paths.get(parent.path(), name + "-implementors")
-        Files.move(oldPathImplementors, newPathImplementors)
+function ResourceDriver(fileName, text) {
+    this.fileName = fileName
+    this.text = text;
 
-        myName = name
-    },
-    setText: function(text) {
+    this.addResource = function(name, text) {
+        var driver = new MyResourceDriver(name + ".txt", text)
+        driver.parent = this
+        return driver
+    }
+    this.removeResource = function(name) {
 
     }
-}*/);
+    this.path = function() {
+        var thisName = this.fileName.replaceFirst("[.][^.]+$", "")
+        return this.parent.path() + "/" + thisName
+        /*if(this.parent !== undefined)
+            this.parent.path() + "/" + thisName
+        return this.basePath + "/" + thisName*/
+    }
+    this.setName = function(name) {
+        print("this.name:" + this.fileName)
+        print("setName:" + name)
+        var oldPath = Paths.get(this.parent.path(), this.fileName)
+        var newPath = Paths.get(this.parent.path(), name + ".txt")
+        print("oldPath:" + oldPath)
+        print("newPath:" + newPath)
+        Files.move(oldPath, newPath)
+        var thisName = this.fileName.replaceFirst("[.][^.]+$", "")
+        var oldPathImplementors = Paths.get(this.parent.path(), thisName + "-implementors")
+        if(oldPathImplementors.toFile().exists()) {
+            var newPathImplementors = Paths.get(this.parent.path(), name + "-implementors")
+            Files.move(oldPathImplementors, newPathImplementors)
+        }
+
+        this.fileName = name + ".txt"
+    }
+    this.setText = function(text) {
+
+    }
+}
 
 function loadProject(node, file) {
     var filter
@@ -85,54 +88,30 @@ function loadProject(node, file) {
             var resourceNode = node.getResource(f.getName())
             // TODO: Set top level driver
             print("create driver");
-            var driverInstance = {myName:"", text:"", basePath:"",
-                addResource: function(name, text) {
-                    var driver = new MyResourceDriver();
-                    driver.myName = name;
-                    driver.text = text;
-                    return driver;
-                },
-                removeResource: function(name) {
-
-                },
-                path: function() {
-                    if(parent !== undefined)
-                        parent.path() + "/" + name
-                    return basePath + "/" + name
-                },
-                setName: function(name) {
-                    print("setName:" + name);
-                    var oldPath = Paths.get(parent.path(), myName)
-                    var newPath = Paths.get(parent.path(), name)
-                    Files.move(oldPath, newPath)
-                    var oldPathImplementors = Paths.get(parent.path(), myName + "-implementors")
-                    var newPathImplementors = Paths.get(parent.path(), name + "-implementors")
-                    Files.move(oldPathImplementors, newPathImplementors)
-
-                    myName = name
-                },
-                setText: function(text) {
-
-                }
-            };
-            var driver = new MyResourceDriver(driverInstance);
+            var driver = new ResourceDriver(f.getName(), "")
             print("created driver");
             print("setting name");
-            driverInstance.myName = f.getName();
-            print("driverInstance.myName:" + driverInstance.myName);
+            //driver.name = f.getName();
+            print("driver.name:" + driver.name);
             //driverInstance.setMyName(f.getName());
             print("set name");
-            driverInstance.basePath = f.getParentFile().getAbsolutePath();
+            var basePath = f.getParentFile().getAbsolutePath();
             print("basePath:" + f.getParentFile().getAbsolutePath());
             print("basePath:" + driver.basePath);
+            driver.parent = {
+                //basePath: basePath,
+                path: function() {
+                    return basePath
+                }
+            }
             //driver.text = text;
             resourceNode.setDriver(driver);
 
-            loadDir(resourceNode, f, filter)
+            loadDir(resourceNode, f, filter, driver)
         });
 }
 
-function loadDir(node, dirPath, filter) {
+function loadDir(node, dirPath, filter, parentDriver) {
     Arrays.asList(new File(dirPath).listFiles()).stream()
         .filter(function(f) {return f.isFile() && filter(f)})
         .forEach(function(f) {
@@ -142,16 +121,15 @@ function loadDir(node, dirPath, filter) {
             var name = f.getName().replaceFirst("[.][^.]+$", "")
             node.addResource(name, text)
             var resourceNode = node.getResource(name)
-            var driver = new MyResourceDriver();
-            driver.myName = f.getName();
-            driver.text = text;
-            resourceNode.setDriver(driver);
+            var driver = new ResourceDriver(f.getName(), text)
+            driver.parent = parentDriver
+            resourceNode.setDriver(driver)
             // TODO: Set driver
 
             var implementorsPath = Paths.get(f.getParentFile().getAbsolutePath(), name +"-implementors").toFile()
             if(implementorsPath.exists()) {
                 print(implementorsPath)
-                loadDir(resourceNode, implementorsPath, filter)
+                loadDir(resourceNode, implementorsPath, filter, driver)
             }
         });
 }

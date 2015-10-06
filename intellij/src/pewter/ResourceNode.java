@@ -17,6 +17,7 @@ public class ResourceNode extends DefaultMutableTreeNode {
     public void setUserObject(Object userObject) {
         if (userObject instanceof String) {
             ((Resource) getUserObject()).setName((String) userObject);
+            ((Resource) getUserObject()).getDriver().setName((String) userObject);
         } else
             super.setUserObject(userObject);
     }

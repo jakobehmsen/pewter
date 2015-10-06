@@ -1,5 +1,7 @@
 package pewter;
 
+import jdk.nashorn.api.scripting.ScriptObjectMirror;
+
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultStyledDocument;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -19,9 +21,37 @@ public class DefaultProjectResource implements ProjectResource {
     }
 
     @Override
-    public void setDriver(ResourceDriver driver) {
+    public void setDriver(ScriptObjectMirror driver) {
         //this.driver = driver;
-        ((Resource)resourceNode.getUserObject()).setDriver(driver);
+        ((Resource)resourceNode.getUserObject()).setDriver(new ScriptObjectMirrorResourceDriver(driver));
+    }
+
+    private static class ScriptObjectMirrorResourceDriver implements ResourceDriver {
+        private ScriptObjectMirror driver;
+
+        private ScriptObjectMirrorResourceDriver(ScriptObjectMirror driver) {
+            this.driver = driver;
+        }
+
+        @Override
+        public ResourceDriver addResource(String name, String text) {
+            return new ScriptObjectMirrorResourceDriver((ScriptObjectMirror) driver.callMember("addResource", name, text));
+        }
+
+        @Override
+        public void removeResource(String name) {
+            driver.callMember("removeResource", name);
+        }
+
+        @Override
+        public void setName(String name) {
+            driver.callMember("setName", name);
+        }
+
+        @Override
+        public void setText(String text) {
+            driver.callMember("setText", text);
+        }
     }
 
     @Override
